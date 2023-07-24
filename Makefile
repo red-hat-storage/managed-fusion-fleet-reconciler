@@ -43,6 +43,10 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: test
+test:
+	go test ./... -v -coverprofile cover.out
+
 .PHONY: build
 build:
 	go build -o $(LOCALBIN)/managed-fusion-fleet-reconciler main.go
