@@ -6,18 +6,18 @@ import (
 	"github.com/red-hat-storage/managed-fusion-fleet-reconciler/pkg/db"
 	"github.com/red-hat-storage/managed-fusion-fleet-reconciler/pkg/forman"
 
-	"go.uber.org/zap"
+	"github.com/go-logr/logr"
 )
 
-func Reconcile(logger *zap.Logger, client *db.Database, req forman.Request) forman.Result {
+func Reconcile(log logr.Logger, client *db.Database, req forman.Request) forman.Result {
 	ctx := context.Background()
-	logger.Info("Processing request", zap.String("name", req.Name))
+	log.Info("Processing request", "name", req.Name)
 	provider, err := client.GetProviderCluster(ctx, req.Name)
 	if err != nil {
-		logger.Error("Failed to get provider cluster", zap.Error(err))
+		log.Error(err, "Failed to get provider cluster")
 		return forman.Result{}
 	}
-	logger.Info("Provider", zap.String("clusterId", provider.ClusterID))
+	log.Info("Provider", "clusterId", provider.ClusterID)
 
 	return forman.Result{}
 }

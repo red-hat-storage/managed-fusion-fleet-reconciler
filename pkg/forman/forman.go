@@ -6,7 +6,7 @@ import (
 	"github.com/red-hat-storage/managed-fusion-fleet-reconciler/pkg/utils"
 	"github.com/red-hat-storage/managed-fusion-fleet-reconciler/pkg/workers"
 
-	"go.uber.org/zap"
+	"github.com/go-logr/logr"
 )
 
 type provider struct {
@@ -25,7 +25,7 @@ type Result struct {
 }
 
 func GoForman(
-	logger *zap.Logger,
+	log logr.Logger,
 	workerCount int,
 	reconcile func(req Request) Result,
 ) chan Request {
@@ -40,12 +40,12 @@ func GoForman(
 			go func() { toWorkers <- req }()
 		}
 
-		logger.Info("Starting", zap.Int("workers", workerCount))
+		log.Info("Starting", "workers", workerCount)
 		for i := 0; i < workerCount; i++ {
 			workers.GoWorker(toWorkers, results, reconcile)
 		}
 
-		logger.Info("Waiting for incoming events")
+		log.Info("Waiting for incoming events")
 		for {
 			select {
 			case req := <-requests:

@@ -3,10 +3,12 @@ package db
 import (
 	"context"
 	"fmt"
+	"os"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/red-hat-storage/managed-fusion-fleet-reconciler/pkg/types"
-	"go.uber.org/zap"
+
+	"github.com/go-logr/logr"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func GetConnectionString(host, user, password, name string, port int) string {
@@ -56,7 +58,7 @@ func (pg *Database) Close(ctx context.Context) {
 	pg.pool.Close()
 }
 
-func (pg *Database) OnProvider(ctx context.Context, logger *zap.Logger, notifyExisting bool, fn func(providerName string)) error {
+func (pg *Database) OnProvider(ctx context.Context, log logr.Logger, notifyExisting bool, fn func(providerName string)) error {
 	var err error
 	if pg.conn, err = pg.pool.Acquire(ctx); err != nil {
 		return fmt.Errorf("failed to acquire connection: %v", err)
@@ -73,10 +75,10 @@ func (pg *Database) OnProvider(ctx context.Context, logger *zap.Logger, notifyEx
 				// If the connection is closed, release the connection and exit the goroutine
 				if pg.conn.Conn().IsClosed() {
 					pg.conn.Release()
-					logger.Error("Connection closed by server:", zap.Error(err))
+					log.Error(err, "Connection closed by server:")
 					return
 				}
-				logger.Error("failed to wait for notification", zap.Error(err))
+				log.Error(err, "failed to wait for notification")
 				continue
 			}
 			fn(notification.Payload)
@@ -88,14 +90,16 @@ func (pg *Database) OnProvider(ctx context.Context, logger *zap.Logger, notifyEx
 			query := fmt.Sprintf("SELECT cluster_id FROM %s", pg.tables.providers)
 			rows, err := pg.pool.Query(ctx, query)
 			if err != nil {
-				logger.Fatal("failed to query database", zap.Error(err))
+				log.Error(err, "failed to query database")
+				os.Exit(1)
 			}
 			defer rows.Close()
 
 			for rows.Next() {
 				var clusterID string
 				if err := rows.Scan(&clusterID); err != nil {
-					logger.Fatal("failed to scan row", zap.Error(err))
+					log.Error(err, "failed to scan row")
+					os.Exit(1)
 				}
 				fn(clusterID)
 			}
