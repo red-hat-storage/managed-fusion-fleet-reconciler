@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +10,8 @@ import (
 	"github.com/red-hat-storage/managed-fusion-fleet-reconciler/pkg/db"
 	"github.com/red-hat-storage/managed-fusion-fleet-reconciler/pkg/forman"
 	"github.com/red-hat-storage/managed-fusion-fleet-reconciler/pkg/reconciler"
+
+	"github.com/go-logr/zapr"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v2"
 )
@@ -66,17 +67,7 @@ func loadAndValidateConfig(filePath string) (*config, error) {
 const configFileEnvVarName = "FLEET_RECONCILER_CONFIG"
 
 func main() {
-	//logger := logr.Logger{}
 	ctx := context.Background()
-	configFilePath := os.Getenv(configFileEnvVarName)
-	if configFilePath == "" {
-		log.Fatalf("%q environment variable not set", configFileEnvVarName)
-	}
-	// parse configuration from yaml file
-	conf, err := loadAndValidateConfig(configFilePath)
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	zapConfig := zap.Config{
 		Level:            zap.NewAtomicLevel(),
@@ -85,31 +76,47 @@ func main() {
 		OutputPaths:      []string{"stdout"},
 		ErrorOutputPaths: []string{"stderr"},
 	}
-	logger, err := zapConfig.Build()
+	ZapLogger, err := zapConfig.Build()
 	if err != nil {
-		log.Fatal(err)
+		fmt.Printf("failed to create logger: %v\n", err)
+		os.Exit(1)
+	}
+	log := zapr.NewLogger(ZapLogger)
+
+	configFilePath := os.Getenv(configFileEnvVarName)
+	if configFilePath == "" {
+		log.Error(fmt.Errorf("%q environment variable not set", configFileEnvVarName), "failed to load configuration file path")
+		os.Exit(1)
+	}
+	// parse configuration from yaml file
+	conf, err := loadAndValidateConfig(configFilePath)
+	if err != nil {
+		log.Error(err, "failed to load configuration")
+		os.Exit(1)
 	}
 
 	connString := db.GetConnectionString(conf.DB.Host, conf.DB.User, conf.DB.Password, conf.DB.Name, conf.DB.Port)
 
 	dbClient, err := db.NewClient(ctx, connString, conf.DB.Tables)
 	if err != nil {
-		logger.Fatal(err.Error())
+		log.Error(err, "failed to create database client")
+		os.Exit(1)
 	}
 	defer dbClient.Close(ctx)
 
-	reqChan := forman.GoForman(logger, conf.Reconcile.Concurrency,
+	reqChan := forman.GoForman(log, conf.Reconcile.Concurrency,
 		func(req forman.Request) forman.Result {
-			return reconciler.Reconcile(logger, dbClient, req)
+			return reconciler.Reconcile(log, dbClient, req)
 		},
 	)
 
-	if err := dbClient.OnProvider(ctx, logger, true, func(provideName string) {
+	if err := dbClient.OnProvider(ctx, log, true, func(provideName string) {
 		req := forman.Request{}
 		req.Name = provideName
 		reqChan <- req
 	}); err != nil {
-		logger.Fatal(err.Error())
+		log.Error(err, "failed to register provider listener")
+		os.Exit(1)
 	}
 
 	sigChan := make(chan os.Signal, 1)
@@ -117,5 +124,5 @@ func main() {
 
 	// wait for signal to shutdown
 	<-sigChan
-	logger.Info("Received signal, shutting down")
+	log.Info("Received signal, shutting down")
 }
