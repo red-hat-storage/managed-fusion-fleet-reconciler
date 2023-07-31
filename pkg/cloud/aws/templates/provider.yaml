@@ -1,0 +1,515 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudFormation Template to create the Provider Configuration
+
+Parameters:
+  PrimaryCIDR:
+    Description: The Primary CIDR of the VPC being created.
+    Type: String
+  SecondaryCIDR:
+    Description: The Primary CIDR of the VPC being created.
+    Type: String
+  ImageID:
+    Description: Image ID
+    Type: String
+  InstanceType:
+    Description: Instance Type
+    Type: String
+  InstanceCount:
+    Description: Instance Count
+    Type: Number
+  TransitGatewayID:
+    Description: The ID of Transit Gateway
+    Type: String
+  ControlPlaneTransitGatewayRouteTableID:
+    Description: The ID of Control Plane TransitGateway Route Table
+    Type: String
+  ProviderTransitGatewayRouteTableID:
+    Description: The ID of Provider TransitGateway Route Table
+    Type: String
+  ControlPlanePublicRouteTableID:
+    Description: The ID of Control Plane Public Route Table
+    Type: String
+  ControlPlanePrivateRouteTableID0:
+    Description: The ID of Control Plane Private Route Table0
+    Type: String
+  ControlPlanePrivateRouteTableID1:
+    Description: The ID of Control Plane Private Route Table1
+    Type: String
+  ControlPlanePrivateRouteTableID2:
+    Description: The ID of Control Plane Private Route Table2
+    Type: String
+  IgnitionScriptS3URL:
+    Description: The Object URL for the ignition script.
+    Type: String
+
+Resources:
+  PVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref PrimaryCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: "Name"
+          Value: !Join ["-", ["prov", !Ref 'AWS::StackName']]
+
+  VPCSecondaryCIDR:
+    Type: AWS::EC2::VPCCidrBlock
+    DependsOn: PVPC
+    DeletionPolicy: Retain
+    Properties:
+      VpcId: !Ref PVPC
+      CidrBlock: !Ref SecondaryCIDR
+
+  PrimaryPrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PVPC
+      CidrBlock: !Select [0, !Cidr [!Ref 'PrimaryCIDR', 3, 6]]
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "pry", !Select [2, !Split ["-", !Select [0, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  PrimaryPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PVPC
+      CidrBlock: !Select [1, !Cidr [!Ref 'PrimaryCIDR', 3, 6]]
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "pry", !Select [2, !Split ["-", !Select [1, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  PrimaryPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PVPC
+      CidrBlock: !Select [2, !Cidr [!Ref 'PrimaryCIDR', 3, 6]]
+      AvailabilityZone: !Select [2, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "pry", !Select [2, !Split ["-", !Select [2, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  SecondaryPrivateSubnet0:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PVPC
+      CidrBlock: !Select [0, !Cidr [!Ref 'SecondaryCIDR', 3, 4]]
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "sey", !Select [2, !Split ["-", !Select [0, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  SecondaryPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PVPC
+      CidrBlock: !Select [1, !Cidr [!Ref 'SecondaryCIDR', 3, 4]]
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "sey", !Select [2, !Split ["-", !Select [1, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  SecondaryPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref PVPC
+      CidrBlock: !Select [2, !Cidr [!Ref 'SecondaryCIDR', 3, 4]]
+      AvailabilityZone: !Select [2, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "sey", !Select [2, !Split ["-", !Select [2, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  ProviderTransitGatewayAttachment:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGatewayID
+      VpcId: !Ref PVPC
+      SubnetIds:
+        - !Ref SecondaryPrivateSubnet0
+        - !Ref SecondaryPrivateSubnet1
+        - !Ref SecondaryPrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", !Ref 'AWS::StackName']]
+
+  ProviderTransitGatewayRouteTableAssociation:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Properties:
+      TransitGatewayAttachmentId: !Ref ProviderTransitGatewayAttachment
+      TransitGatewayRouteTableId: !Ref ProviderTransitGatewayRouteTableID
+
+  ProviderTransitGatewayRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !Ref SecondaryCIDR
+      TransitGatewayRouteTableId: !Ref ProviderTransitGatewayRouteTableID
+      Blackhole: true
+
+  ControlPlaneTransitGatewayRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !Ref SecondaryCIDR
+      TransitGatewayRouteTableId: !Ref ControlPlaneTransitGatewayRouteTableID
+      TransitGatewayAttachmentId: !Ref ProviderTransitGatewayAttachment
+
+  PrivateNATGateway0:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      ConnectivityType: "private"
+      SubnetId: !Ref SecondaryPrivateSubnet0
+      Tags:
+        - Key: "Name"
+          Value: !Join ["-", ["prov", "sey", !Select [2, !Split ["-", !Select [0, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  PrivateNATGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      ConnectivityType: "private"
+      SubnetId: !Ref SecondaryPrivateSubnet1
+      Tags:
+        - Key: "Name"
+          Value: !Join ["-", ["prov", "sey", !Select [2, !Split ["-", !Select [1, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  PrivateNATGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      ConnectivityType: "private"
+      SubnetId: !Ref SecondaryPrivateSubnet2
+      Tags:
+        - Key: "Name"
+          Value: !Join ["-", ["prov", "sey", !Select [2, !Split ["-", !Select [2, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  PrimaryCIDRPrivateRouteTable0:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PVPC
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "pry", !Select [2, !Split ["-", !Select [0, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  PrimaryCIDRPrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PVPC
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "pry", !Select [2, !Split ["-", !Select [1, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  PrimaryCIDRPrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PVPC
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["prov", "pry", !Select [2, !Split ["-", !Select [2, !GetAZs '']]], !Ref 'AWS::StackName']]
+
+  SecondaryCIDRPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref PVPC
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["sey", !Ref 'AWS::StackName']]
+
+  PrimaryCIDRPrivateRoute0:
+    Type: AWS::EC2::Route
+    DependsOn: PrivateNATGateway0
+    Properties:
+      RouteTableId: !Ref PrimaryCIDRPrivateRouteTable0
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref PrivateNATGateway0
+
+  PrimaryCIDRPrivateRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: PrivateNATGateway1
+    Properties:
+      RouteTableId: !Ref PrimaryCIDRPrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref PrivateNATGateway1
+
+  PrimaryCIDRPrivateRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: PrivateNATGateway2
+    Properties:
+      RouteTableId: !Ref PrimaryCIDRPrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref PrivateNATGateway2
+
+  SecondaryCIDRPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: ProviderTransitGatewayAttachment
+    Properties:
+      RouteTableId: !Ref SecondaryCIDRPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      TransitGatewayId: !Ref TransitGatewayID
+
+  PrimarySubnetRouteTableAssociation0:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrimaryPrivateSubnet0
+      RouteTableId: !Ref PrimaryCIDRPrivateRouteTable0
+
+  PrimarySubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrimaryPrivateSubnet1
+      RouteTableId: !Ref PrimaryCIDRPrivateRouteTable1
+
+  PrimarySubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrimaryPrivateSubnet2
+      RouteTableId: !Ref PrimaryCIDRPrivateRouteTable2
+
+  SecondarySubnetRouteTableAssociation0:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SecondaryPrivateSubnet0
+      RouteTableId: !Ref SecondaryCIDRPrivateRouteTable
+
+  SecondarySubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SecondaryPrivateSubnet1
+      RouteTableId: !Ref SecondaryCIDRPrivateRouteTable
+
+  SecondarySubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SecondaryPrivateSubnet2
+      RouteTableId: !Ref SecondaryCIDRPrivateRouteTable
+
+  ControlPlanePublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref ControlPlanePublicRouteTableID
+      DestinationCidrBlock: !Ref SecondaryCIDR
+      TransitGatewayId: !Ref TransitGatewayID
+
+  ControlPlanePrivateRoute0:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref ControlPlanePrivateRouteTableID0
+      DestinationCidrBlock: !Ref SecondaryCIDR
+      TransitGatewayId: !Ref TransitGatewayID
+
+  ControlPlanePrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref ControlPlanePrivateRouteTableID1
+      DestinationCidrBlock: !Ref SecondaryCIDR
+      TransitGatewayId: !Ref TransitGatewayID
+
+  ControlPlanePrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref ControlPlanePrivateRouteTableID2
+      DestinationCidrBlock: !Ref SecondaryCIDR
+      TransitGatewayId: !Ref TransitGatewayID
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ["-", ["sat", "sg", !Ref 'AWS::StackName']]
+      GroupDescription: Satellite Connectivity for Provider
+      VpcId: !Ref PVPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 30000
+          ToPort: 32767
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: udp
+          FromPort: 30000
+          ToPort: 32767
+      Tags:
+        - Key: "Name"
+          Value: !Join ["-", ["sat", "sg", !Ref 'AWS::StackName']]
+
+  SelfSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      SourceSecurityGroupId: !Ref SecurityGroup
+      IpProtocol: -1
+
+  StorageSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ["-", ["storage", "sg", !Ref 'AWS::StackName']]
+      GroupDescription: Storage Connectivity
+      VpcId: !Ref PVPC
+      Tags:
+        - Key: "Name"
+          Value: !Join ["-", ["storage", "sg", !Ref 'AWS::StackName']]
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: loadBalancer
+      Subnets:
+        - !Ref PrimaryPrivateSubnet0
+        - !Ref PrimaryPrivateSubnet1
+        - !Ref PrimaryPrivateSubnet2
+      Scheme: internal
+      Type: network
+      Tags:
+        - Key: Name
+          Value: !Join ["-", ["loadbalaner", !Ref 'AWS::StackName']]
+
+  LoadBalancerStorageTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ["-", ["target", "group", !Ref 'AWS::StackName']]
+      Port: 31659
+      Protocol: TCP
+      TargetType: instance
+      VpcId: !Ref PVPC
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: TCP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+
+  LoadBalancerStorageListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 50051
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref LoadBalancerStorageTargetGroup
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+  InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  ProviderLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        S3AccessCreds:
+          type: "S3"
+          roleName: !Ref EC2Role
+      AWS::CloudFormation::Init:
+        configSets:
+          init:
+            - repoKey
+        repoKey:
+          files:
+            "/tmp/attachHost.sh":
+              mode: '000100'
+              owner: root
+              group: root
+              source: !Ref IgnitionScriptS3URL
+              authentication: "S3AccessCreds"
+    Properties:
+      LaunchTemplateName: !Join ["-", ["ProviderLaunchTemplate", !Ref 'AWS::StackName']]
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - Ebs:
+              VolumeSize: 25
+              VolumeType: gp3
+              Iops: 3000
+              DeleteOnTermination: true
+              Encrypted: false
+            DeviceName: /dev/sda1
+          - Ebs:
+              VolumeSize: 100
+              VolumeType: gp3
+              Iops: 3000
+              DeleteOnTermination: true
+              Encrypted: false
+            DeviceName: /dev/sdb
+        ImageId: !Ref ImageID
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Name: !Ref InstanceProfile
+        SecurityGroupIds:
+          - !Ref SecurityGroup
+          - !Ref StorageSecurityGroup
+        UserData:
+          Fn::Base64:
+            Fn::Sub:
+              |
+              #!/bin/bash -xe
+              # install the packages required for cfn and attachHost Script
+              sudo yum -y update
+              sudo yum-config-manager --enable '*'
+              sudo yum -y install python39 python3-pip
+              sudo yum install container-selinux -y
+              pip3 install pystache
+              ln -s /usr/bin/python3 /usr/bin/python
+              # download the cfn-bootstrap script and install the package
+              sudo curl -O https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+              sudo tar xvf aws-cfn-bootstrap-py3-latest.tar.gz
+              cd aws-cfn-bootstrap-*/
+              sudo python setup.py build
+              sudo python setup.py install
+              sudo chmod 775 /usr/local/init/redhat/cfn-hup
+              # download the ignition script to the instance
+              sudo /usr/local/bin/cfn-init -v --stack ${AWS::StackName} --region ${AWS::Region} --resource ControlPlaneLaunchTemplate --configsets init
+              # update the script
+              line_num=$(sudo grep -n "MACHINE_ID=\$(cat /etc/machine-id)" /tmp/attachHost.sh | cut -d ':' -f 1)
+              sudo awk -v line_num="${!line_num}" 'NR == line_num {print $0 "\nHOSTNAME=\${!HOSTNAME}-\${!MACHINE_ID:0:5}"; next} 1' /tmp/attachHost.sh > /tmp/attachHost_tmp.sh
+              sudo mv /tmp/attachHost_tmp.sh /tmp/attachHost.sh
+              # add labels
+              sudo sudo sed -i "s/SELECTOR_LABELS='{}'/SELECTOR_LABELS='{\"for\":\"${AWS::StackName}\"}'/" /tmp/attachHost.sh
+              # run the script
+              sudo bash /tmp/attachHost.sh
+
+  InstanceAutoScalingScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      DesiredCapacity: !Ref InstanceCount
+      MinSize: !Ref InstanceCount
+      MaxSize: !Ref InstanceCount
+      TargetGroupARNs:
+        - !Ref LoadBalancerStorageTargetGroup
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ProviderLaunchTemplate
+        Version: !GetAtt ProviderLaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref PrimaryPrivateSubnet0
+        - !Ref PrimaryPrivateSubnet1
+        - !Ref PrimaryPrivateSubnet2
+      Tags:
+        - Key: "Name"
+          Value: !Join ["-", ["prov", "pry", !Ref 'AWS::StackName']]
+          PropagateAtLaunch: true
+
+Outputs:
+  LoadBalancerDNS:
+    Description: The DNS of the LoadBalancer
+    Value: !GetAtt LoadBalancer.DNSName
+  StorageSecurityGroupID:
+    Description: The ID of Storage Security Group
+    Value: !Ref StorageSecurityGroup
